@@ -87,7 +87,7 @@ public:
     // FILE HANDLER METHODS (PERSISTENCE LAYER)
     // ========================================================================
     void saveBookingsToFile() {
-        std::ofstream file(SAVE_FILE, std::ios::trunc); // Overwrite file fresh
+        std::ofstream file(SAVE_FILE, std::ios::trunc);
         if (!file.is_open()) {
             std::cout << "[SYSTEM ERROR] Could not open database file to write data.\n";
             return;
@@ -109,7 +109,6 @@ public:
     void loadBookingsFromFile() {
         std::ifstream file(SAVE_FILE);
         if (!file.is_open()) {
-            // File doesn't exist yet, which is completely fine on the first run
             return; 
         }
 
@@ -137,7 +136,6 @@ public:
             Ticket loadedTicket{pnr, name, passport, flightNum, src, dest, fare, status};
             tickets[pnr] = loadedTicket;
 
-            // Deduct seat from flight inventory if the ticket is active/confirmed
             if (status == TicketStatus::Confirmed && routes.find(src) != routes.end()) {
                 for (auto& flight : routes[src]) {
                     if (flight.flightNumber == flightNum && flight.destination == dest) {
@@ -172,7 +170,7 @@ public:
                 std::cout << "    Flight No    : " << flightNum << " (" << src << " -> " << dest << ")\n";
                 std::cout << "    Fare Charged : ₹" << flight.price << "\n";
 
-                saveBookingsToFile(); // Auto-commit to file system
+                saveBookingsToFile(); 
                 return pnr;
             }
         }
@@ -202,7 +200,7 @@ public:
         ticket.status = TicketStatus::Cancelled;
         std::cout << ">>> [SUCCESS] PNR " << pnr << " Cancelled. Refund of ₹" << ticket.farePaid << " processed.\n";
         
-        saveBookingsToFile(); // Save the updated cancellation status to local disk file
+        saveBookingsToFile();
     }
 
     void findCheapestRoute(const std::string& source, const std::string& target) {
@@ -295,7 +293,6 @@ public:
 int main() {
     AirlineEngine engine;
 
-    // --- POPULATE GRAPH NETWORK ENVIRONMENT ---
     engine.addFlight("DEL", "BOM", "6E-2012", 5500.0, 2.10, 180); 
     engine.addFlight("DEL", "BOM", "AI-805",  6200.0, 2.15, 100); 
     engine.addFlight("DEL", "BLR", "AI-803",  7200.0, 2.45, 2);   
@@ -317,7 +314,6 @@ int main() {
 
     engine.addFlight("CCU", "DEL", "AI-702",  6300.0, 2.20, 160); 
 
-    // --- RE-BOOT STORAGE RETRIEVAL HANDSHAKE ---
     engine.loadBookingsFromFile();
 
     int choice = 0;
