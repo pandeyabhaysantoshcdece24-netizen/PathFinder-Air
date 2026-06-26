@@ -9,387 +9,358 @@
 #include <fstream>
 #include <sstream>
 
-const double INF = std::numeric_limits<double>::infinity();
-const std::string SAVE_FILE = "bookings.csv";
+using namespace std;
 
-enum class TicketStatus { Confirmed, Cancelled };
+const double INF = numeric_limits<double>::infinity();
+const string DB_FILE = "bookings.csv";
 
-struct Flight {
-    std::string flightNumber;
-    std::string destination;
+enum class tstatus { ok, can };
+
+struct flight {
+    string fnum;
+    string dest;
     double price;
-    double duration; 
-    bool isCancelled = false;
-    int availableSeats;
+    double dur; 
+    bool dead = false;
+    int seats;
 
-    Flight(std::string num, std::string dest, double p, double dur, int seats = 180)
-        : flightNumber(num), destination(dest), price(p), duration(dur), availableSeats(seats) {}
+    flight(string n, string d, double p, double dr, int s = 180)
+        : fnum(n), dest(d), price(p), dur(dr), seats(s) {}
 };
 
-struct Ticket {
-    std::string ticketID;
-    std::string passengerName;
-    std::string passportNumber;
-    std::string flightNumber;
-    std::string source;
-    std::string destination;
-    double farePaid;
-    TicketStatus status;
+struct ticket {
+    string tid;
+    string name;
+    string pass;
+    string fnum;
+    string src;
+    string dest;
+    double fare;
+    tstatus status;
 };
 
-class AirlineEngine {
+class engine {
 private:
-    std::unordered_map<std::string, std::vector<Flight>> routes;
-    std::vector<std::string> airports;
-    std::unordered_map<std::string, Ticket> tickets; 
+    unordered_map<string, vector<flight>> adj;
+    vector<string> nodes;
+    unordered_map<string, ticket> tx; 
 
-    std::string generatePNR() {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> distrib(100000, 999999);
-        return "PNR" + std::to_string(distrib(gen));
+    string gen_pnr() {
+        random_device rd;
+        mt19937 gen(rd());
+        uniform_int_distribution<> dist(100000, 999999);
+        return "pnr" + to_string(dist(gen));
     }
 
 public:
-    void addAirport(const std::string& code) {
-        if (routes.find(code) == routes.end()) {
-            routes[code] = std::vector<Flight>();
-            airports.push_back(code);
+    void add_node(const string& code) {
+        if (adj.find(code) == adj.end()) {
+            adj[code] = vector<flight>();
+            nodes.push_back(code);
         }
     }
 
-    void addFlight(const std::string& src, const std::string& dest, const std::string& flightNum, double price, double duration, int seats = 180) {
-        addAirport(src);
-        addAirport(dest);
-        routes[src].push_back(Flight(flightNum, dest, price, duration, seats));
+    void add_f(const string& src, const string& dest, const string& fnum, double p, double dr, int s = 180) {
+        add_node(src);
+        add_node(dest);
+        adj[src].push_back(flight(fnum, dest, p, dr, s));
     }
 
-    bool showDirectFlights(const std::string& src, const std::string& dest) {
-        if (routes.find(src) == routes.end()) return false;
+    bool show_dir(const string& src, const string& dest) {
+        if (adj.find(src) == adj.end()) return false;
         
         bool found = false;
-        for (const auto& flight : routes.at(src)) {
-            if (flight.destination == dest && !flight.isCancelled) {
+        for (const auto& f : adj.at(src)) {
+            if (f.dest == dest && !f.dead) {
                 if (!found) {
-                    std::cout << "\n--- Available Direct Flights Available ---\n";
+                    cout << "\ndirect flights available:\n";
                     found = true;
                 }
-                std::cout << " -> Flight No: " << flight.flightNumber 
-                          << " | Price: ₹" << flight.price 
-                          << " | Duration: " << flight.duration << " hrs"
-                          << " | Seats Left: " << flight.availableSeats << "\n";
+                cout << "flight: " << f.fnum 
+                     << " | price: rs." << f.price 
+                     << " | duration: " << f.dur << "h"
+                     << " | seats: " << f.seats << "\n";
             }
         }
         return found;
     }
 
-    // ========================================================================
-    // FILE HANDLER METHODS (PERSISTENCE LAYER)
-    // ========================================================================
-    void saveBookingsToFile() {
-        std::ofstream file(SAVE_FILE, std::ios::trunc);
+    void save_db() {
+        ofstream file(DB_FILE, ios::trunc);
         if (!file.is_open()) {
-            std::cout << "[SYSTEM ERROR] Could not open database file to write data.\n";
+            cout << "error: unable to save data.\n";
             return;
         }
 
-        for (const auto& [pnr, ticket] : tickets) {
-            file << ticket.ticketID << ","
-                 << ticket.passengerName << ","
-                 << ticket.passportNumber << ","
-                 << ticket.flightNumber << ","
-                 << ticket.source << ","
-                 << ticket.destination << ","
-                 << ticket.farePaid << ","
-                 << static_cast<int>(ticket.status) << "\n";
+        for (const auto& pair : tx) {
+            ticket t = pair.second;
+            file << t.tid << "," << t.name << "," << t.pass << ","
+                 << t.fnum << "," << t.src << "," << t.dest << ","
+                 << t.fare << "," << static_cast<int>(t.status) << "\n";
         }
         file.close();
     }
 
-    void loadBookingsFromFile() {
-        std::ifstream file(SAVE_FILE);
-        if (!file.is_open()) {
-            return; 
-        }
+    void load_db() {
+        ifstream file(DB_FILE);
+        if (!file.is_open()) return; 
 
-        std::string line;
-        int activeCount = 0;
-        while (std::getline(file, line)) {
+        string line;
+        int count = 0;
+        while (getline(file, line)) {
             if (line.empty()) continue;
             
-            std::stringstream ss(line);
-            std::string pnr, name, passport, flightNum, src, dest, fareStr, statusStr;
+            stringstream ss(line);
+            string pnr, name, pass, fnum, src, dest, s_fare, s_stat;
 
-            std::getline(ss, pnr, ',');
-            std::getline(ss, name, ',');
-            std::getline(ss, passport, ',');
-            std::getline(ss, flightNum, ',');
-            std::getline(ss, src, ',');
-            std::getline(ss, dest, ',');
-            std::getline(ss, fareStr, ',');
-            std::getline(ss, statusStr, ',');
+            getline(ss, pnr, ','); getline(ss, name, ',');
+            getline(ss, pass, ','); getline(ss, fnum, ',');
+            getline(ss, src, ','); getline(ss, dest, ',');
+            getline(ss, s_fare, ','); getline(ss, s_stat, ',');
 
-            double fare = std::stod(fareStr);
-            TicketStatus status = (statusStr == "1") ? TicketStatus::Cancelled : TicketStatus::Confirmed;
+            double fare = stod(s_fare);
+            tstatus stat = (s_stat == "1") ? tstatus::can : tstatus::ok;
 
-            // Rebuild ticket record
-            Ticket loadedTicket{pnr, name, passport, flightNum, src, dest, fare, status};
-            tickets[pnr] = loadedTicket;
+            tx[pnr] = ticket{pnr, name, pass, fnum, src, dest, fare, stat};
 
-            if (status == TicketStatus::Confirmed && routes.find(src) != routes.end()) {
-                for (auto& flight : routes[src]) {
-                    if (flight.flightNumber == flightNum && flight.destination == dest) {
-                        flight.availableSeats--;
+            if (stat == tstatus::ok && adj.find(src) != adj.end()) {
+                for (auto& f : adj[src]) {
+                    if (f.fnum == fnum && f.dest == dest) {
+                        f.seats--;
                         break;
                     }
                 }
             }
-            activeCount++;
+            count++;
         }
         file.close();
-        if (activeCount > 0) {
-            std::cout << "[SYSTEM] Restored " << activeCount << " ledger items securely from " << SAVE_FILE << ".\n";
-        }
+        if (count > 0) cout << "restored " << count << " bookings from database.\n";
     }
 
-    std::string bookTicket(const std::string& name, const std::string& passport, 
-                           const std::string& src, const std::string& dest, const std::string& flightNum, std::string explicitPNR = "") {
-        if (routes.find(src) == routes.end()) return "";
+    string book(const string& name, const string& pass, const string& src, const string& dest, const string& fnum, string exp = "") {
+        if (adj.find(src) == adj.end()) return "";
 
-        for (auto& flight : routes[src]) {
-            if (flight.flightNumber == flightNum && flight.destination == dest) {
-                if (flight.isCancelled || flight.availableSeats <= 0) return "";
+        for (auto& f : adj[src]) {
+            if (f.fnum == fnum && f.dest == dest) {
+                if (f.dead || f.seats <= 0) return "";
 
-                flight.availableSeats--;
-                std::string pnr = explicitPNR.empty() ? generatePNR() : explicitPNR;
-                tickets[pnr] = Ticket{pnr, name, passport, flightNum, src, dest, flight.price, TicketStatus::Confirmed};
+                f.seats--;
+                string pnr = exp.empty() ? gen_pnr() : exp;
+                tx[pnr] = ticket{pnr, name, pass, fnum, src, dest, f.price, tstatus::ok};
 
-                std::cout << "\n>>> [SUCCESS] Ticket Issued Successfully!\n";
-                std::cout << "    PNR          : " << pnr << "\n";
-                std::cout << "    Passenger    : " << name << "\n";
-                std::cout << "    Flight No    : " << flightNum << " (" << src << " -> " << dest << ")\n";
-                std::cout << "    Fare Charged : ₹" << flight.price << "\n";
+                cout << "\nticket booked successfully.\n"
+                     << "pnr          : " << pnr << "\n"
+                     << "passenger    : " << name << "\n"
+                     << "flight       : " << fnum << " (" << src << " -> " << dest << ")\n"
+                     << "price paid   : rs." << f.price << "\n";
 
-                saveBookingsToFile(); 
+                save_db(); 
                 return pnr;
             }
         }
         return "";
     }
 
-    void cancelTicket(const std::string& pnr) {
-        auto it = tickets.find(pnr);
-        if (it == tickets.end()) {
-            std::cout << "[ERROR] Invalid PNR sequence: " << pnr << "\n";
+    void cancel(const string& pnr) {
+        auto it = tx.find(pnr);
+        if (it == tx.end()) {
+            cout << "error: invalid pnr -> " << pnr << "\n";
             return;
         }
 
-        Ticket& ticket = it->second;
-        if (ticket.status == TicketStatus::Cancelled) {
-            std::cout << "[WARNING] Ticket " << pnr << " has already been processed as cancelled.\n";
+        ticket& t = it->second;
+        if (t.status == tstatus::can) {
+            cout << "ticket is already cancelled.\n";
             return;
         }
 
-        for (auto& flight : routes[ticket.source]) {
-            if (flight.flightNumber == ticket.flightNumber) {
-                flight.availableSeats++;
+        for (auto& f : adj[t.src]) {
+            if (f.fnum == t.fnum) {
+                f.seats++;
                 break;
             }
         }
 
-        ticket.status = TicketStatus::Cancelled;
-        std::cout << ">>> [SUCCESS] PNR " << pnr << " Cancelled. Refund of ₹" << ticket.farePaid << " processed.\n";
-        
-        saveBookingsToFile();
+        t.status = tstatus::can;
+        cout << "cancellation processed. refund of rs." << t.fare << " issued.\n";
+        save_db();
     }
 
-    void findCheapestRoute(const std::string& source, const std::string& target) {
-        std::unordered_map<std::string, double> minPrice;
-        std::unordered_map<std::string, std::string> parent;
+    void find_path(const string& src, const string& dst) {
+        unordered_map<string, double> dist;
+        unordered_map<string, string> par;
         
-        for (const auto& pair : routes) minPrice[pair.first] = INF;
-        if (minPrice.find(source) == minPrice.end()) minPrice[source] = INF;
-        if (minPrice.find(target) == minPrice.end()) minPrice[target] = INF;
+        for (const auto& p : adj) dist[p.first] = INF;
+        if (dist.find(src) == dist.end()) dist[src] = INF;
+        if (dist.find(dst) == dist.end()) dist[dst] = INF;
         
-        std::priority_queue<std::pair<double, std::string>, std::vector<std::pair<double, std::string>>, std::greater<>> pq;
-        minPrice[source] = 0.0;
-        pq.push({0.0, source});
+        priority_queue<pair<double, string>, vector<pair<double, string>>, greater<pair<double, string>>> pq;
+        dist[src] = 0.0;
+        pq.push(make_pair(0.0, src));
 
         while (!pq.empty()) {
-            auto [currentPrice, u] = pq.top();
+            auto top = pq.top();
+            double d = top.first;
+            string u = top.second;
             pq.pop();
 
-            if (currentPrice > minPrice[u]) continue;
-            if (u == target) break;
+            if (d > dist[u]) continue;
+            if (u == dst) break;
 
-            for (const auto& flight : routes[u]) {
-                if (flight.isCancelled) continue; 
+            for (const auto& f : adj[u]) {
+                if (f.dead) continue; 
 
-                if (minPrice[u] + flight.price < minPrice[flight.destination]) {
-                    minPrice[flight.destination] = minPrice[u] + flight.price;
-                    parent[flight.destination] = u;
-                    pq.push({minPrice[flight.destination], flight.destination});
+                if (dist[u] + f.price < dist[f.dest]) {
+                    dist[f.dest] = dist[u] + f.price;
+                    par[f.dest] = u;
+                    pq.push(make_pair(dist[f.dest], f.dest));
                 }
             }
         }
 
-        if (minPrice[target] == INF) {
-            std::cout << "[RECOMMENDATION INFO] No system flight paths found connecting " << source << " to " << target << ".\n";
+        if (dist[dst] == INF) {
+            cout << "no route found connecting " << src << " to " << dst << ".\n";
             return;
         }
 
-        std::vector<std::string> path;
-        for (std::string curr = target; curr != ""; curr = parent[curr]) {
+        vector<string> path;
+        for (string curr = dst; curr != ""; curr = par[curr]) {
             path.push_back(curr);
-            if (curr == source) break;
+            if (curr == src) break;
         }
-        std::reverse(path.begin(), path.end());
+        reverse(path.begin(), path.end());
 
-        std::cout << " -> System Smart Recommendation (Cheapest Over-all Path): ₹" << minPrice[target] << " via Layout [ ";
+        cout << "cheapest path: rs." << dist[dst] << " via layout [ ";
         for (size_t i = 0; i < path.size(); ++i) {
-            std::cout << path[i] << (i == path.size() - 1 ? "" : " -> ");
+            cout << path[i] << (i == path.size() - 1 ? "" : " -> ");
         }
-        std::cout << " ]\n";
+        cout << " ]\n";
     }
 
-    void computeGlobalConnectivity() {
-        size_t n = airports.size();
-        std::unordered_map<std::string, size_t> airportIndex;
-        for (size_t i = 0; i < n; ++i) airportIndex[airports[i]] = i;
+    void get_net() {
+        size_t n = nodes.size();
+        unordered_map<string, size_t> idx;
+        for (size_t i = 0; i < n; ++i) idx[nodes[i]] = i;
 
-        std::vector<std::vector<int>> hopMatrix(n, std::vector<int>(n, 1e7));
-        for (size_t i = 0; i < n; ++i) hopMatrix[i][i] = 0;
+        vector<vector<int>> mat(n, vector<int>(n, 1e7));
+        for (size_t i = 0; i < n; ++i) mat[i][i] = 0;
 
-        for (const auto& [src, flights] : routes) {
-            for (const auto& f : flights) {
-                if (!f.isCancelled) hopMatrix[airportIndex[src]][airportIndex[f.destination]] = 1; 
+        for (const auto& p : adj) {
+            string src = p.first;
+            for (const auto& f : p.second) {
+                if (!f.dead) mat[idx[src]][idx[f.dest]] = 1; 
             }
         }
 
         for (size_t k = 0; k < n; ++k) {
             for (size_t i = 0; i < n; ++i) {
                 for (size_t j = 0; j < n; ++j) {
-                    if (hopMatrix[i][k] + hopMatrix[k][j] < hopMatrix[i][j]) {
-                        hopMatrix[i][j] = hopMatrix[i][k] + hopMatrix[k][j];
+                    if (mat[i][k] + mat[k][j] < mat[i][j]) {
+                        mat[i][j] = mat[i][k] + mat[k][j];
                     }
                 }
             }
         }
 
-        std::cout << "\n--- INDIAN DOMESTIC CONNECTIVITY MATRIX (Min Flight Hops) ---\n      ";
-        for (const auto& ap : airports) std::cout << ap << "   ";
-        std::cout << "\n";
+        cout << "\nconnectivity matrix (min hops):\n      ";
+        for (const auto& ap : nodes) cout << ap << "   ";
+        cout << "\n";
         for (size_t i = 0; i < n; ++i) {
-            std::cout << airports[i] << "   ";
+            cout << nodes[i] << "   ";
             for (size_t j = 0; j < n; ++j) {
-                if (hopMatrix[i][j] > 1e5) std::cout << "∞   ";
-                else std::cout << hopMatrix[i][j] << "   ";
+                if (mat[i][j] > 1e5) cout << "-   ";
+                else cout << mat[i][j] << "   ";
             }
-            std::cout << "\n";
+            cout << "\n";
         }
     }
 };
 
 int main() {
-    AirlineEngine engine;
+    engine eng;
 
-    engine.addFlight("DEL", "BOM", "6E-2012", 5500.0, 2.10, 180); 
-    engine.addFlight("DEL", "BOM", "AI-805",  6200.0, 2.15, 100); 
-    engine.addFlight("DEL", "BLR", "AI-803",  7200.0, 2.45, 2);   
-    engine.addFlight("DEL", "GOI", "UK-847",  8500.0, 2.30, 150); 
-    engine.addFlight("DEL", "HYD", "6E-512",  4800.0, 2.15, 180); 
-    engine.addFlight("DEL", "CCU", "AI-701",  6100.0, 2.10, 160); 
+    eng.add_f("del", "bom", "6e-2012", 5500.0, 2.10); 
+    eng.add_f("del", "bom", "ai-805",  6200.0, 2.15); 
+    eng.add_f("del", "blr", "ai-803",  7200.0, 2.45, 2);   
+    eng.add_f("del", "goi", "uk-847",  8500.0, 2.30); 
+    eng.add_f("del", "hyd", "6e-512",  4800.0, 2.15); 
+    eng.add_f("del", "ccu", "ai-701",  6100.0, 2.10); 
 
-    engine.addFlight("BOM", "DEL", "6E-2342", 5400.0, 2.15, 180); 
-    engine.addFlight("BOM", "BLR", "QP-1102", 4200.0, 1.45, 180); 
-    engine.addFlight("BOM", "GOI", "6E-5314", 3800.0, 1.15, 180); 
-    engine.addFlight("BOM", "HYD", "AI-615",  3900.0, 1.25, 150); 
+    eng.add_f("bom", "del", "6e-2342", 5400.0, 2.15); 
+    eng.add_f("bom", "blr", "qp-1102", 4200.0, 1.45); 
+    eng.add_f("bom", "goi", "6e-5314", 3800.0, 1.15); 
+    eng.add_f("bom", "hyd", "ai-615",  3900.0, 1.25); 
 
-    engine.addFlight("BLR", "DEL", "UK-812",  7400.0, 2.40, 150); 
-    engine.addFlight("BLR", "GOI", "I5-1326", 3100.0, 1.20, 140); 
-    engine.addFlight("BLR", "CCU", "6E-421",  6800.0, 2.35, 180); 
+    eng.add_f("blr", "del", "uk-812",  7400.0, 2.40); 
+    eng.add_f("blr", "goi", "i5-1326", 3100.0, 1.20); 
+    eng.add_f("blr", "ccu", "6e-421",  6800.0, 2.35); 
 
-    engine.addFlight("HYD", "BLR", "6E-356",  3200.0, 1.05, 180); 
-    engine.addFlight("HYD", "CCU", "QP-1512", 5900.0, 2.00, 180); 
+    eng.add_f("hyd", "blr", "6e-356",  3200.0, 1.05); 
+    eng.add_f("hyd", "ccu", "qp-1512", 5900.0, 2.00); 
 
-    engine.addFlight("CCU", "DEL", "AI-702",  6300.0, 2.20, 160); 
+    eng.add_f("ccu", "del", "ai-702",  6300.0, 2.20); 
 
-    engine.loadBookingsFromFile();
+    eng.load_db();
 
     int choice = 0;
     while (true) {
-        std::cout << "\n==================================================\n";
-        std::cout << "      REAL-TIME INDIAN DOMESTIC AIRLINE SYSTEM     \n";
-        std::cout << "==================================================\n";
-        std::cout << "1. Search Cheapest Point-to-Point Route (Dijkstra)\n";
-        std::cout << "2. Live Passenger Ticket Booking\n";
-        std::cout << "3. Cancel Ticket / Issue Refund via PNR\n";
-        std::cout << "4. Generate Global Network Hops Matrix\n";
-        std::cout << "5. Exit Operations Console\n";
-        std::cout << "Enter system choice (1-5): ";
-        std::cin >> choice;
+        cout << "\nmenu options:\n"
+             << "1. find route\n"
+             << "2. book ticket\n"
+             << "3. cancel ticket\n"
+             << "4. network matrix\n"
+             << "5. exit\n"
+             << "choice: ";
+        cin >> choice;
 
-        if (choice == 5) {
-            std::cout << "\nSafely parking database clusters. Operations stopped. Goodbye!\n";
-            break;
-        }
+        if (choice == 5) break;
 
         if (choice == 1) {
-            std::string src, dest;
-            std::cout << "\nEnter 3-Letter Source Code (e.g., DEL, BOM): ";
-            std::cin >> src;
-            std::cout << "Enter 3-Letter Destination Code (e.g., GOI, BLR): ";
-            std::cin >> dest;
+            string src, dest;
+            cout << "source: "; cin >> src;
+            cout << "destination: "; cin >> dest;
             
-            std::transform(src.begin(), src.end(), src.begin(), ::toupper);
-            std::transform(dest.begin(), dest.end(), dest.begin(), ::toupper);
+            transform(src.begin(), src.end(), src.begin(), ::tolower);
+            transform(dest.begin(), dest.end(), dest.begin(), ::tolower);
             
-            engine.findCheapestRoute(src, dest);
+            eng.find_path(src, dest);
         } 
         else if (choice == 2) {
-            std::string name, passport, src, dest, flightNum;
-            std::cin.ignore(); 
+            string name, pass, src, dest, fnum;
+            cin.ignore(); 
             
-            std::cout << "\nEnter Passenger Full Name: ";
-            std::getline(std::cin, name);
-            std::cout << "Enter Document/Passport ID: ";
-            std::cin >> passport;
-            std::cout << "Enter 3-Letter Source Airport: ";
-            std::cin >> src;
-            std::cout << "Enter 3-Letter Destination Airport: ";
-            std::cin >> dest;
+            cout << "passenger name: "; getline(cin, name);
+            cout << "passport/id: "; cin >> pass;
+            cout << "source: "; cin >> src;
+            cout << "destination: "; cin >> dest;
             
-            std::transform(src.begin(), src.end(), src.begin(), ::toupper);
-            std::transform(dest.begin(), dest.end(), dest.begin(), ::toupper);
+            transform(src.begin(), src.end(), src.begin(), ::tolower);
+            transform(dest.begin(), dest.end(), dest.begin(), ::tolower);
             
-            bool directFlightsExist = engine.showDirectFlights(src, dest);
-            if (!directFlightsExist) {
-                std::cout << "\n[NOTICE] No direct flights found from " << src << " to " << dest << ".\n";
+            if (!eng.show_dir(src, dest)) {
+                cout << "no direct options found. checking connecting paths...\n";
             }
-            
-            std::cout << "--- Route Optimization Helper ---\n";
-            engine.findCheapestRoute(src, dest);
-            std::cout << "---------------------------------\n";
+            eng.find_path(src, dest);
 
-            std::cout << "\nBased on the options above, type the Flight Number you want to book: ";
-            std::cin >> flightNum;
-            std::transform(flightNum.begin(), flightNum.end(), flightNum.begin(), ::toupper);
+            cout << "enter flight number to confirm: ";
+            cin >> fnum;
+            transform(fnum.begin(), fnum.end(), fnum.begin(), ::tolower);
             
-            engine.bookTicket(name, passport, src, dest, flightNum);
+            eng.book(name, pass, src, dest, fnum);
         } 
         else if (choice == 3) {
-            std::string pnr;
-            std::cout << "\nEnter 9-Character PNR String to process: ";
-            std::cin >> pnr;
-            std::transform(pnr.begin(), pnr.end(), pnr.begin(), ::toupper);
-            engine.cancelTicket(pnr);
+            string pnr;
+            cout << "enter pnr: ";
+            cin >> pnr;
+            transform(pnr.begin(), pnr.end(), pnr.begin(), ::tolower);
+            eng.cancel(pnr);
         } 
         else if (choice == 4) {
-            engine.computeGlobalConnectivity();
+            eng.get_net();
         } 
         else {
-            std::cout << "[ALERT] Invalid execution instruction entry. Try again.\n";
+            cout << "invalid input.\n";
         }
     }
     return 0;
-}
+}c
